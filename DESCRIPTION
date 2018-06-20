@@ -1,0 +1,9 @@
+Package: mixed.utils
+Title: A mixed bag of utility for visualisation and data analysis
+Version: 0.0.1
+Authors@R: person("Fabio", "Ticconi", email = "fabio.ticconi@gmail.com", role = c("aut", "cre"))
+Description: What the package does (one paragraph).
+Depends: R (>= 3.4.4)
+License: BSD
+Encoding: UTF-8
+LazyData: true
