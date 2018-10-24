@@ -1,32 +1,35 @@
 
-# filename MUST be either an absolute path or relative to
-# the caller file name
-source2 <- function(filename, setwd=F) {
-    path <- filepath()
+this.file.name <- function () {
+    # https://stackoverflow.com/a/1816487
+    frame_files <- lapply(sys.frames(), function(x) x$ofile)
+    frame_files <- Filter(Negate(is.null), frame_files)
 
-    oldwd = getwd()
-
-    setwd(dirname(path))
-    source(filename)
-
-    if (!setwd) {
-        setwd(oldwd)
-    }
-
-    return(oldwd)
+    if (length(frame_files) > 0)
+        frame_files[[length(frame_files)]]
+    else
+        ""
 }
 
-filepath <- function() {
-    print(sys.frames()[[1]])
+this.dir.name <- function() {
     cmdArgs <- commandArgs(trailingOnly = FALSE)
     needle <- "--file="
     match <- grep(needle, cmdArgs)
     if (length(match) > 0) {
         # Rscript
-        return(normalizePath(sub(needle, "", cmdArgs[match])))
+        return(dirname(normalizePath(sub(needle, "", cmdArgs[match]))))
     } else {
         # 'source'd via R console
-        return(normalizePath(sys.frames()[[1]]$ofile))
+        filename <- this.file.name()
+
+        if (filename != "")
+            return(dirname(normalizePath(filename)))
+        else {
+            # if we couldn't find any file, we assume this was
+            # loaded via Hydrogen (and we also assume that the kernel is
+            # set to startup where the initial file is, or this won't work)
+            print("Warning: probably using Hydrogen to load file?")
+            return(getwd())
+        }
     }
 }
 
