@@ -1,13 +1,45 @@
 
-this.file.name <- function () {
+colSd <- function (x, na.rm=FALSE) apply(X=x, MARGIN=2, FUN=sd, na.rm=na.rm)
+rowSd <- function (x, na.rm=FALSE) apply(X=x, MARGIN=1, FUN=sd, na.rm=na.rm)
+
+cor.test.p <- function(x, method="pearson") {
+    # https://stackoverflow.com/a/13112337
+    FUN <- function(x, y) cor.test(x, y, method = method)[["p.value"]]
+    z <- outer(
+        colnames(x),
+        colnames(x),
+        Vectorize(function(i, j) FUN(x[, i], x[, j]))
+    )
+    dimnames(z) <- list(colnames(x), colnames(x))
+    z
+}
+
+count.pairwise <- function(x, y) {
+    # same as count.pairwise(x, y) from psych package
+    n <- t(!is.na(x)) %*% (!is.na(y))
+    n
+}
+
+cor2pvalue <- function(r, n) {
+  t <- (r*sqrt(n-2))/sqrt(1-r^2)
+  # p <- 2*(1 - pt(abs(t),(n-2)))
+  p <- -2 *  expm1(pt(abs(t),(n-2),log.p=TRUE))
+  se <- sqrt((1-r*r)/(n-2))
+  out <- list(r, n, t, p, se)
+  names(out) <- c("r", "n", "t", "p", "se")
+  return(out)
+}
+
+this.file.name <- function() {
     # https://stackoverflow.com/a/1816487
     frame_files <- lapply(sys.frames(), function(x) x$ofile)
     frame_files <- Filter(Negate(is.null), frame_files)
 
-    if (length(frame_files) > 0)
+    if (length(frame_files) > 0) {
         frame_files[[length(frame_files)]]
-    else
+    } else {
         ""
+    }
 }
 
 this.dir.name <- function() {
@@ -21,9 +53,9 @@ this.dir.name <- function() {
         # 'source'd via R console
         filename <- this.file.name()
 
-        if (filename != "")
+        if (filename != "") {
             return(dirname(normalizePath(filename)))
-        else {
+        } else {
             # if we couldn't find any file, we assume this was
             # loaded via Hydrogen (and we also assume that the kernel is
             # set to startup where the initial file is, or this won't work)
@@ -33,19 +65,30 @@ this.dir.name <- function() {
     }
 }
 
+hclustavg <- function(x) {
+    hclust(x, method = "average")
+}
+
+hclustward <- function(x) {
+    hclust(x, method = "ward.D2")
+}
+
 hclustfun <- function(x) {
     hclust(x, method = "complete")
 }
+
 cordist <- function(x) {
     dd <- as.dist((1 - cor(t(x), use = "pairwise.complete.obs")) / 2, diag = T)
     dd[which(is.na(dd))] <- 0.5
     dd
 }
+
 abscordist <- function(x) {
     dd <- as.dist(1 - abs(cor(t(x), use = "pairwise.complete.obs")), diag = T)
     dd[which(is.na(dd))] <- 0
     dd
 }
+
 reorderfun <- function(d, w) reorder(d, w)
 
 r2 <- function(preds, actual) {
@@ -123,17 +166,21 @@ transf_train_test <- function(data, variables, train) {
         Sqrt = norm_fun(data[train, , drop = F], t_fun[[3]]),
         Squared = norm_fun(data[train, , drop = F], t_fun[[4]])
     )
+    # print(df)
     norm_best_i <- max.col(replace(df, is.na(df), -Inf), ties.method = "first")
+    # print(norm_best_i)
     norm_best_f <- t_fun[norm_best_i]
-    print(norm_best_f)
-    data_t <- data.frame(sapply(1:ncol(data), function(i) norm_best_f[[i]](data[, i, drop = F])))
+    # print(norm_best_f)
+    data_t <- data.frame(sapply(
+        1:ncol(data),
+        function(i) norm_best_f[[i]](data[, i, drop = F])
+    ))
     rownames(data_t) <- rownames(data)
     colnames(data_t) <- colnames(data)
-    rm(data)
 
     tmp[variables] <- data_t
 
-    return(tmp)
+    return(list(pvalues=df, transf_data=tmp))
 }
 
 make_path <- function(dirname) {
@@ -165,7 +212,7 @@ intersect_dist <- function(df) {
 }
 
 longitudinal_dist <- function(data, variables, abs = F, dist = T) {
-    library(rmcorr)
+    devtools::install_github("lmarusich/rmcorr")
 
     # just a hack to have a nice variable-by-variable matrix
     df <- as.data.frame(matrix(, length(variables), length(variables), dimnames = list(variables, variables)))
@@ -173,11 +220,10 @@ longitudinal_dist <- function(data, variables, abs = F, dist = T) {
 
     df_pv <- df
 
-    # pairs of variables to avoid
+    # pairs of variables
     cmbs <- as.data.frame(combn(variables, 2))
 
-    for (var_pair in cmbs)
-    {
+    for (var_pair in cmbs) {
         var_pair <- as.character(var_pair)
 
         res <- rmcorr(PatientId, var_pair[1], var_pair[2], data)
@@ -217,8 +263,11 @@ longitudinal_dist <- function(data, variables, abs = F, dist = T) {
     return(l)
 }
 
-make_heatmap <- function(orig_data, dirname = "./", prefix = "heatmap", vars = colnames(orig_data), rows = rownames(orig_data), threshold = 0.3, k = 4,
-                         dist_method = "pearson", abs = F, abs2 = abs, method = "complete", square = T, k2 = k, output = cairo_pdf, cexRow = 1, cexCol = 1) {
+make_heatmap <- function(orig_data, dirname = "./", prefix = "heatmap", vars = colnames(orig_data),
+                         rows = rownames(orig_data), threshold = NULL, k = 4, dist_method = "pearson",
+                         abs = F, abs2 = abs, method = "complete", square = T, k2 = k, output = cairo_pdf,
+                         cexRow = 1, cexCol = 1, vlim = c(0, 1), na.fix = T, scale = "none",
+                         colRow = NULL, colCol = NULL) {
     if (identical(output, svg)) {
         ext <- ".svg"
     }
@@ -241,7 +290,33 @@ make_heatmap <- function(orig_data, dirname = "./", prefix = "heatmap", vars = c
     print(paste0(path, prefix))
 
     data <- orig_data[rows, vars]
+
+    if (na.fix) {
+        # We remove all-NA rows and columns
+
+        data <- data[rowSums(is.na(data)) < ncol(data), ]
+        data <- data[, colSums(is.na(data)) < nrow(data)]
+    }
+
+    # scaling
+    if (scale == "row") {
+        data_scale <- scale(t(data), center = T, scale = T)
+    }
+    else if (scale == "column") {
+        data_scale <- scale(data, center = T, scale = T)
+    }
+    else if (scale == "rowperc") {
+        data_scale <- sweep(data, 1, rowSums(data), "/")
+    }
+    else if (scale == "columnperc") {
+        data_scale <- sweep(data, 2, colSums(data), "/")
+    }
+    else {
+        data_scale <- data
+    }
+
     tdata <- t(data)
+    tdata_scale <- t(data_scale)
 
     set1_cols <- brewer.pal(9, "Set1")
 
@@ -250,43 +325,69 @@ make_heatmap <- function(orig_data, dirname = "./", prefix = "heatmap", vars = c
     ## we get a similarity matrix first
 
     if (is.null(dist_method)) {
-        # this assumes that the data already IS a similarity matrix between 0 and 1
+        # this assumes that the data already IS a similarity
+        # matrix between 0 and 1
         dd <- data
 
-        dd[which(is.na(dd))] <- 0.5 # we don't assume anything in case of missing value
+        # we don't assume anything in case of missing value
+        dd[which(is.na(dd))] <- 0.5
+
+        dd2 <- as.dist(1 - dd)
     }
     else if (dist_method == "intersect") {
         dd <- as.matrix(intersect_dist(data))
+
+        dd[which(is.na(dd))] <- 0
+
+        dd2 <- as.dist(t(apply(dd, 1, function(x) max(x, na.rm = T) - x)))
     }
     else if (dist_method == "longitudinal") {
         dd <- longitudinal_dist(orig_data[rows, ], vars, abs = F, dist = F)$d
 
         dd[which(is.na(dd))] <- 0
+        diag(dd) <- 1
+
+        dd2 <- as.dist(1 - dd)
     }
-    else if (dist_method == "pearson" || dist_method == "spearman") {
+    else if (grepl("(pearson|kendall|spearman)_pv", dist_method)) {
+        r <- cor(data, use = "pairwise.complete.obs", method = dist_method)
+        res <- corr2pvalue(r, count.pairwise(data, data))
+        pv <- res$p
+
+        dd <- sign(res$r) * -log10(pv)
+
+        dd[which(is.na(dd))] <- 0
+        diag(dd) <- 1
+
+        dd2 <- as.dist(1 - dd)
+    }
+    else if (grepl("(pearson|kendall|spearman)", dist_method)) {
         dd <- cor(data, use = "pairwise.complete.obs", method = dist_method)
 
         dd[which(is.na(dd))] <- 0
+        diag(dd) <- 1
+
+        dd2 <- as.dist(1 - dd)
     }
     else {
         library(vegan)
 
-        dd <- 1 - as.matrix(vegdist(tdata, method = dist_method, diag = T, upper = T, binary = F))
+        dd <- 1 - as.matrix(vegdist(tdata,
+            method = dist_method,
+            diag = T, upper = T, binary = F
+        ))
+        dd[which(is.na(dd))] <- 0
+        dd2 <- as.dist(1 - dd)
     }
 
     print(head(dd))
 
-    diag(dd) <- 1 # sometimes the above utterly fails, putting NA in the diagonal which is absurdly wrong
-
     l$data <- dd
 
-    ## now we must make a distance out of it
+    ## apply absolute only to distance object
 
     if (abs) {
-        dd2 <- as.dist(1 - abs(dd))
-    }
-    else {
-        dd2 <- as.dist(1 - dd)
+        dd2 <- abs(dd)
     }
 
     l$data2 <- dd2
@@ -294,43 +395,81 @@ make_heatmap <- function(orig_data, dirname = "./", prefix = "heatmap", vars = c
     ## and finally we cluster
 
     cl <- hclust(dd2, method = method)
-    clusters <- cutree(cl, k = k)
-    sidecols <- as.character(set1_cols[clusters])
-    rowv <- reorderfun(as.dendrogram(cl), colMeans(data, na.rm = T))
-
     l$cl <- cl
-    l$clusters <- clusters
+
+    if (k > 0) {
+        clusters <- cutree(cl, k = k)
+        sidecols <- as.character(set1_cols[clusters])
+        l$clusters <- clusters
+    }
+
+    rowv <- reorderfun(as.dendrogram(cl), colMeans(data, na.rm = T))
 
     if (square) {
         # we want "co-correlations", eg row-vs-row
 
-        if (!is.null(threshold)) {
-            dd[which(abs(dd) < threshold)] <- 0
+        if (is.null(vlim)) {
+            vlim <- range(as.matrix(dd), finite = T)
         }
 
-        if (dist_method == "pearson" || dist_method == "spearman") {
+        if (is.na(vlim[1])) {
+            vlim[1] <- min(dd, na.rm = T)
+        }
+
+        if (is.na(vlim[2])) {
+            vlim[2] <- max(dd, na.rm = T)
+        }
+
+        if (vlim[1] < 0) {
             colours <- colorRampPalette(c("blue", "ghostwhite", "red"), space = "rgb")(99)
-            bins <- seq(-1, 1, length = 100)
         }
         else {
             colours <- colorRampPalette(c("ghostwhite", "red"), space = "rgb")(99)
-            bins <- seq(0, 1, length = 100)
         }
 
-        heatmap.2(dd,
-            dendrogram = "row", RowSideColors = sidecols, density.info = "none", trace = "none", Rowv = rowv, Colv = rowv,
-            cexRow = cexRow, cexCol = cexCol, margins = c(9, 9), srtCol = 90, col = colours, breaks = bins, symkey = F, lhei = c(1, 5), scale = "none"
-        )
+        bins <- seq(vlim[1], vlim[2], length = 100)
+
+        if (k > 0) {
+            heatmap.2(dd,
+                dendrogram = "row", RowSideColors = sidecols, density.info = "none", trace = "none",
+                Rowv = rowv, Colv = rowv, cexRow = cexRow, cexCol = cexCol, margins = c(9, 9),
+                srtCol = 90, col = colours, breaks = bins, symkey = F, lhei = c(1, 5), scale = scale,
+                colRow = colRow, colCol = colCol
+            )
+        }
+        else {
+            heatmap.2(dd,
+                dendrogram = "row", density.info = "none", trace = "none",
+                Rowv = rowv, Colv = rowv, cexRow = cexRow, cexCol = cexCol, margins = c(9, 9),
+                srtCol = 90, col = colours, breaks = bins, symkey = F, lhei = c(1, 5), scale = scale,
+                colRow = colRow, colCol = colCol
+            )
+        }
     }
     else {
-        if (is.null(dist_method) || dist_method == "") {
-            stop("ERROR: non-square heatmap only possible with pearson and spearman methods")
+        if (is.null(vlim)) {
+            vlim <- range(as.matrix(data_scale), finite = T)
         }
 
-        minmax <- range(as.matrix(data), finite = T)
+        if (is.na(vlim[1])) {
+            vlim[1] <- min(data_scale, na.rm = T)
+        }
 
-        colours <- colorRampPalette(c("ghostwhite", "red"), space = "rgb")(99)
-        bins <- seq(0, minmax[2], length = 100) # based on original counts
+        if (is.na(vlim[2])) {
+            vlim[2] <- max(data_scale, na.rm = T)
+        }
+
+        if (vlim[1] < 0) {
+            colours <- colorRampPalette(c("blue", "ghostwhite", "red"), space = "rgb")(99)
+
+            # colours <- rev(brewer.pal(11,"Spectral"))
+            # colours <- colorRampPalette(colours, space="rgb")(99)
+        }
+        else {
+            colours <- colorRampPalette(c("ghostwhite", "red"), space = "rgb")(99)
+        }
+
+        bins <- seq(vlim[1], vlim[2], length = 100)
 
         # rows-vs-columns in the heatmap (both with dendrograms)
 
@@ -339,42 +478,114 @@ make_heatmap <- function(orig_data, dirname = "./", prefix = "heatmap", vars = c
             dd <- tdata
 
             dd[which(is.na(dd))] <- 0.5 # we don't assume anything in case of missing value
+
+            dd2 <- as.dist(1 - dd)
         }
         else if (dist_method == "intersect") {
             dd <- as.matrix(intersect_dist(tdata))
+
+            dd[which(is.na(dd))] <- 0
+
+            dd2 <- as.dist(t(apply(dd, 1, function(x) max(x, na.rm = T) - x)))
         }
         else if (dist_method == "longitudinal") {
             stop("ERROR: only square heatmap possible with longitudinal distance")
         }
-        else if (dist_method == "pearson" || dist_method == "spearman") {
+        else if (grepl("(pearson|kendall|spearman)_pv", dist_method)) {
+            r <- cor(data, use = "pairwise.complete.obs", method = dist_method)
+            res <- corr2pvalue(r, count.pairwise(data, data))
+            pv <- res$p
+
+            dd <- sign(res$r) * -log10(pv)
+
+            dd[which(is.na(dd))] <- 0
+            diag(dd) <- 1
+
+            dd2 <- as.dist(1 - dd)
+        }
+        else if (grepl("(pearson|kendall|spearman)", dist_method)) {
             dd <- cor(tdata, use = "pairwise.complete.obs", method = dist_method)
 
             dd[which(is.na(dd))] <- 0
+            diag(dd) <- 1
+
+            dd2 <- as.dist(1 - dd)
         }
         else {
-            dd <- 1 - as.matrix(vegdist(data, method = dist_method, diag = T, upper = T, binary = F))
-        }
+            library(vegan)
 
-        diag(dd) <- 1 # sometimes the above utterly fails, putting NA in the diagonal which is absurdly wrong
-
-        if (abs2) {
-            dd2 <- as.dist(1 - abs(dd))
-        }
-        else {
+            dd <- 1 - as.matrix(vegdist(data,
+                method = dist_method,
+                diag = T, upper = T, binary = F
+            ))
+            dd[which(is.na(dd))] <- 0
             dd2 <- as.dist(1 - dd)
         }
 
+        if (abs2) {
+            dd2 <- abs(dd)
+        }
+
+        print(head(dd))
+
         cl <- hclust(dd2, method = method)
-        clusters <- cutree(cl, k = k2)
-        topcols <- as.character(set1_cols[clusters])
+        l$cl2 <- cl
+
+        if (k2 > 0) {
+            clusters <- cutree(cl, k = k2)
+            topcols <- as.character(set1_cols[clusters])
+            l$clusters2 <- clusters
+        }
+
         colv <- reorderfun(as.dendrogram(cl), colMeans(tdata, na.rm = T))
 
-        l$clusters2 <- clusters
+        if (!is.null(threshold)) {
+            data[which(abs(data) < threshold)] <- 0
+        }
 
-        heatmap.2(tdata,
-            dendrogram = "both", RowSideColors = sidecols, ColSideColors = topcols, density.info = "none", trace = "none", Rowv = rowv, Colv = colv,
-            cexRow = cexRow, cexCol = cexCol, margins = c(9, 9), srtCol = 90, col = colours, breaks = bins, symkey = F, lhei = c(1, 5), scale = "none"
-        )
+        if (!is.null(colCol)) {
+            colCol <- colCol[colnames(tdata), ] # in case data was subset
+            print(colCol)
+        }
+
+        if (k2 > 0) {
+            if (k > 0) {
+                heatmap.2(tdata_scale,
+                    dendrogram = "both", RowSideColors = sidecols, ColSideColors = topcols,
+                    density.info = "none", trace = "none", Rowv = rowv, Colv = colv,
+                    cexRow = cexRow, cexCol = cexCol, margins = c(9, 9), srtCol = 90,
+                    col = colours, breaks = bins, symkey = F, lhei = c(1, 5), scale = "none",
+                    colRow = colRow, colCol = colCol
+                )
+            } else {
+                heatmap.2(tdata_scale,
+                    dendrogram = "both", ColSideColors = topcols,
+                    density.info = "none", trace = "none", Rowv = rowv, Colv = colv,
+                    cexRow = cexRow, cexCol = cexCol, margins = c(9, 9), srtCol = 90,
+                    col = colours, breaks = bins, symkey = F, lhei = c(1, 5), scale = "none",
+                    colRow = colRow, colCol = colCol
+                )
+            }
+        }
+        else {
+            if (k > 0) {
+                heatmap.2(tdata_scale,
+                    dendrogram = "both", RowSideColors = sidecols,
+                    density.info = "none", trace = "none", Rowv = rowv, Colv = colv,
+                    cexRow = cexRow, cexCol = cexCol, margins = c(9, 9), srtCol = 90,
+                    col = colours, breaks = bins, symkey = F, lhei = c(1, 5), scale = "none",
+                    colRow = colRow, colCol = colCol
+                )
+            } else {
+                heatmap.2(tdata_scale,
+                    dendrogram = "both",
+                    density.info = "none", trace = "none", Rowv = rowv, Colv = colv,
+                    cexRow = cexRow, cexCol = cexCol, margins = c(9, 9), srtCol = 90,
+                    col = colours, breaks = bins, symkey = F, lhei = c(1, 5), scale = "none",
+                    colRow = colRow, colCol = colCol
+                )
+            }
+        }
     }
 
     dev.off()
@@ -404,8 +615,7 @@ elbow_plot <- function(pca, main = NULL) {
 make_transform_plots <- function(data, variables, dirname) {
     path <- make_path(dirname)
 
-    for (varname in variables)
-    {
+    for (varname in variables) {
         print(varname)
 
         # for every column (excluding a few),
@@ -447,4 +657,53 @@ make_transform_plots <- function(data, variables, dirname) {
 
         dev.off()
     }
+}
+
+make_beeswarm <- function(prefix, dirname, output = svg, ...) {
+    library(beeswarm)
+
+    path <- make_path(dirname)
+
+    if (identical(output, svg)) {
+        ext <- ".svg"
+    }
+    else if (identical(output, pdf) || identical(output, cairo_pdf)) {
+        ext <- ".pdf"
+    }
+    else if (identical(output, postscript)) {
+        ext <- ".eps"
+    }
+    else {
+        print("WARNING: output is neither svg nor pdf/cairo_pdf, so we default to png")
+        output <- png
+        ext <- ".png"
+    }
+
+    output(paste0(path, prefix, ext))
+    beeswarm(...)
+    bxplot(..., xlab = "", add = TRUE)
+    dev.off()
+}
+
+make_scatter <- function(prefix, dirname, output = svg, ...) {
+    path <- make_path(dirname)
+
+    if (identical(output, svg)) {
+        ext <- ".svg"
+    }
+    else if (identical(output, pdf) || identical(output, cairo_pdf)) {
+        ext <- ".pdf"
+    }
+    else if (identical(output, postscript)) {
+        ext <- ".eps"
+    }
+    else {
+        print("WARNING: output is neither svg nor pdf/cairo_pdf, so we default to png")
+        output <- png
+        ext <- ".png"
+    }
+
+    output(paste0(path, prefix, ext))
+    plot(...)
+    dev.off()
 }
