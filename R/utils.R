@@ -282,7 +282,7 @@ longitudinal_dist <- function(data, variables, abs = F, dist = T) {
     return(l)
 }
 
-get_top_elements <- function(data, topN = NULL, topPerc = NULL, min_clones = 3, exclude = NULL, keep_excluded) {
+get_top <- function(data, topN = NULL, topPerc = NULL, min_clones = 3, exclude = NULL, keep_excluded = F) {
     columns <- setdiff(colnames(data), exclude)
 
     if (!is.null(topN)) {
@@ -301,15 +301,15 @@ get_top_elements <- function(data, topN = NULL, topPerc = NULL, min_clones = 3, 
 
             df_rows <- rownames(df)
 
-	    if (keep_excluded) {
-
-            # fix for issue identified on 29/05/2017:
-            # if we take the union, some of the clones left out will
-            # essentially "come back" for each organ.
-            data[setdiff(rownames(data), df_rows), column] <- 0
+            if (!keep_excluded) {
+              # fix for issue identified on 29/05/2017:
+              # if we take the union, some of the clones left out will
+              # essentially "come back" for each organ.
+              data[setdiff(rownames(data), df_rows), column] <- 0
+            }
 
             rows <- union(rows, df_rows)
-        }
+          }
     }
     else if (!is.null(topPerc)) {
         rows <- c()
@@ -328,15 +328,16 @@ get_top_elements <- function(data, topN = NULL, topPerc = NULL, min_clones = 3, 
             abundance <- sum(df) * topPerc
             df_rows <- rownames(df)[cumsum(df) <= abundance]
 
-            if (length(df_rows) < min_clones) {
-                # we force a minimum number of clones
-                df_rows <- rownames(df)[1:min_clones]
-            }
+            # we force a minimum number of clones
+            n_clones <- max(length(df_rows), min_clones)
+            df_rows <- rownames(df)[1:n_clones]
 
-            # fix for issue identified on 29/05/2017:
-            # if we take the union, some of the clones left out will
-            # essentially "come back" for each organ.
-            data[setdiff(rownames(data), df_rows), column] <- 0
+            if (!keep_excluded) {
+              # fix for issue identified on 29/05/2017:
+              # if we take the union, some of the clones left out will
+              # essentially "come back" for each organ.
+              data[setdiff(rownames(data), df_rows), column] <- 0
+            }
 
             rows <- union(rows, df_rows)
         }
