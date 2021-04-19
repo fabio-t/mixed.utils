@@ -1,6 +1,25 @@
 
-colSd <- function (x, na.rm=FALSE) apply(X=x, MARGIN=2, FUN=sd, na.rm=na.rm)
-rowSd <- function (x, na.rm=FALSE) apply(X=x, MARGIN=1, FUN=sd, na.rm=na.rm)
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+colSd     <- function (x, na.rm=FALSE) apply(X=x, MARGIN=2, FUN=sd,     na.rm=na.rm)
+colMax    <- function (x, na.rm=FALSE) apply(X=x, MARGIN=2, FUN=max,    na.rm=na.rm)
+colMin    <- function (x, na.rm=FALSE) apply(X=x, MARGIN=2, FUN=min,    na.rm=na.rm)
+colMedian <- function (x, na.rm=FALSE) apply(X=x, MARGIN=2, FUN=median, na.rm=na.rm)
+rowSd     <- function (x, na.rm=FALSE) apply(X=x, MARGIN=1, FUN=sd,     na.rm=na.rm)
+rowMax    <- function (x, na.rm=FALSE) apply(X=x, MARGIN=1, FUN=max,    na.rm=na.rm)
+rowMin    <- function (x, na.rm=FALSE) apply(X=x, MARGIN=1, FUN=min,    na.rm=na.rm)
+rowMedian <- function (x, na.rm=FALSE) apply(X=x, MARGIN=1, FUN=median, na.rm=na.rm)
+
+# Get lower triangle of the correlation matrix
+  get_lower_tri<-function(cormat, diag = F){
+    cormat[upper.tri(cormat, !diag)] <- NA
+    return(cormat)
+  }
+  # Get upper triangle of the correlation matrix
+  get_upper_tri <- function(cormat, diag = F){
+    cormat[lower.tri(cormat, !diag)]<- NA
+    return(cormat)
+  }
 
 cor.test.p <- function(x, method="pearson") {
     # https://stackoverflow.com/a/13112337
@@ -261,6 +280,72 @@ longitudinal_dist <- function(data, variables, abs = F, dist = T) {
     l$pv <- df_pv
 
     return(l)
+}
+
+get_top_elements <- function(data, topN = NULL, topPerc = NULL, min_clones = 3, exclude = NULL, keep_excluded) {
+    columns <- setdiff(colnames(data), exclude)
+
+    if (!is.null(topN)) {
+        rows <- c()
+
+        topN <- max(topN, min_clones)
+
+        # for each column, take the topN clones (non-null rows)
+        # and merge them together.
+        for (column in columns)
+        {
+            df <- data[column]
+            df <- subset(df, df > 0)
+            df <- df[order(df[, c(1)], decreasing = T), c(1), drop = F]
+            df <- df[1:min(nrow(df), topN), , drop = F]
+
+            df_rows <- rownames(df)
+
+	    if (keep_excluded) {
+
+            # fix for issue identified on 29/05/2017:
+            # if we take the union, some of the clones left out will
+            # essentially "come back" for each organ.
+            data[setdiff(rownames(data), df_rows), column] <- 0
+
+            rows <- union(rows, df_rows)
+        }
+    }
+    else if (!is.null(topPerc)) {
+        rows <- c()
+
+        # for each column, take the topPerc clones (non-null rows)
+        # and merge them together.
+        for (column in columns)
+        {
+            df <- data[column]
+            if (sum(df, na.rm=T) == 0) {
+                print("WARNING: column is made of zeros")
+                next
+            }
+            df <- subset(df, df > 0)
+            df <- df[order(df[, c(1)], decreasing = T), c(1), drop = F]
+            abundance <- sum(df) * topPerc
+            df_rows <- rownames(df)[cumsum(df) <= abundance]
+
+            if (length(df_rows) < min_clones) {
+                # we force a minimum number of clones
+                df_rows <- rownames(df)[1:min_clones]
+            }
+
+            # fix for issue identified on 29/05/2017:
+            # if we take the union, some of the clones left out will
+            # essentially "come back" for each organ.
+            data[setdiff(rownames(data), df_rows), column] <- 0
+
+            rows <- union(rows, df_rows)
+        }
+    }
+    else {
+        rows <- rownames(data)
+    }
+
+    return(data[rows, ])
 }
 
 make_heatmap <- function(orig_data, dirname = "./", prefix = "heatmap", vars = colnames(orig_data),
